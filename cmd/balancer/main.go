@@ -5,20 +5,31 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"go-http-load-balancer/internal/balancer"
 )
 
 func main() {
-	// Базовый структурированный логгер для удобного чтения в консоли.
+	// logger
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
 	mux := http.NewServeMux()
 
-	// Health самого балансировщика (не backend-ов).
+	// Для MVP просто хардкодим backend-ы.
+	backendURLs := mustParseBackends([]string{
+		"http://localhost:9001",
+		"http://localhost:9002",
+		"http://localhost:9003",
+	})
+	lb := balancer.New(backendURLs)
+
+	// Health 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
@@ -34,6 +45,9 @@ func main() {
 			"total_requests": 0,
 		})
 	})
+
+	// Всё остальное проксируем на backend-ы.
+	mux.Handle("/", lb)
 
 	srv := &http.Server{
 		Addr:         ":8080",
@@ -61,12 +75,24 @@ func main() {
 		}
 	}
 
-	// Пытаемся корректно завершить сервер: даём активным запросам время закончить работу.
+	// shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		slog.Error("shutdown error", "err", err)
 	}
 	slog.Info("balancer stopped")
+}
+
+func mustParseBackends(raw []string) []*url.URL {
+	out := make([]*url.URL, 0, len(raw))
+	for _, s := range raw {
+		u, err := url.Parse(s)
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
