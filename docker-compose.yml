@@ -1,0 +1,33 @@
+services:
+  balancer:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - LB_PORT=8080
+      - LB_HEALTHCHECK_INTERVAL=5s
+      - LB_HEALTHCHECK_TIMEOUT=2s
+      - LB_BACKENDS=http://backend-1:9001,http://backend-2:9002,http://backend-3:9003
+    depends_on:
+      - backend-1
+      - backend-2
+      - backend-3
+
+  backend-1:
+    build: .
+    command: ["/usr/local/bin/backend", "--name", "backend-1", "--port", "9001"]
+    expose:
+      - "9001"
+
+  backend-2:
+    build: .
+    command: ["/usr/local/bin/backend", "--name", "backend-2", "--port", "9002"]
+    expose:
+      - "9002"
+
+  backend-3:
+    build: .
+    command: ["/usr/local/bin/backend", "--name", "backend-3", "--port", "9003"]
+    expose:
+      - "9003"
+
