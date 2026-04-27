@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"go-http-load-balancer/internal/balancer"
+	"go-http-load-balancer/internal/config"
 )
 
 func main() {
@@ -19,18 +21,20 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
+	cfg, err := config.FromFlags()
+	if err != nil {
+		slog.Error("invalid config", "err", err)
+		os.Exit(2)
+	}
+
 	mux := http.NewServeMux()
 
-	// Для MVP просто хардкодим backend-ы.
-	backendURLs := mustParseBackends([]string{
-		"http://localhost:9001",
-		"http://localhost:9002",
-		"http://localhost:9003",
-	})
+	backendURLs := mustParseBackends(cfg.Backends)
 	lb := balancer.New(backendURLs)
+	lb.SetMaxRetries(cfg.Retry.MaxRetries)
 
 	// Active health checks
-	hc := balancer.NewHealthChecker(2*time.Second, 800*time.Millisecond)
+	hc := balancer.NewHealthChecker(cfg.HealthCheck.Interval, cfg.HealthCheck.Timeout)
 	hcCtx, hcCancel := context.WithCancel(context.Background())
 	defer hcCancel()
 	go hc.Run(hcCtx, lb.Backends())
@@ -49,11 +53,10 @@ func main() {
 		_ = json.NewEncoder(w).Encode(lb.Stats())
 	})
 
-	// Всё остальное проксируем на backend-ы.
 	mux.Handle("/", lb)
 
 	srv := &http.Server{
-		Addr:         ":8080",
+		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:      mux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -87,10 +90,10 @@ func main() {
 	slog.Info("balancer stopped")
 }
 
-func mustParseBackends(raw []string) []*url.URL {
+func mustParseBackends(raw []config.BackendConfig) []*url.URL {
 	out := make([]*url.URL, 0, len(raw))
-	for _, s := range raw {
-		u, err := url.Parse(s)
+	for _, b := range raw {
+		u, err := url.Parse(b.URL)
 		if err != nil {
 			panic(err)
 		}

@@ -1,32 +1,7 @@
 # Go HTTP Load Balancer
 
-Учебный pet-проект на Go: HTTP reverse-proxy балансировщик нагрузки с round-robin, active health checks backend-сервисов, `/stats`, логированием, таймаутами и graceful shutdown.
+Учебный проект на Go: HTTP reverse-proxy балансировщик нагрузки с round-robin, active health checks backend-сервисов, `/stats`, логированием, таймаутами и graceful shutdown.
 
-## Структура проекта
-
-```
-.
-├── cmd/
-│   ├── balancer/
-│   │   └── main.go
-│   └── backend/
-│       └── main.go
-├── internal/
-│   ├── balancer/
-│   │   ├── backend.go
-│   │   ├── health_checker.go
-│   │   ├── load_balancer.go
-│   │   └── stats.go
-│   ├── config/
-│   │   └── config.go
-│   └── proxy/
-│       └── proxy.go
-├── Dockerfile
-├── docker-compose.yml
-└── go.mod
-```
-
-## Быстрый старт (без Docker)
 
 Запуск backend-ов:
 

@@ -1,9 +1,12 @@
 package balancer
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"sync/atomic"
 
@@ -18,6 +21,8 @@ type LoadBalancer struct {
 	idx      uint64
 
 	totalRequests atomic.Uint64
+
+	maxRetries int
 }
 
 type Option func(*LoadBalancer)
@@ -36,7 +41,7 @@ func New(backends []*url.URL, opts ...Option) *LoadBalancer {
 		bs = append(bs, NewBackend(fmt.Sprintf("backend-%d", i+1), u, p))
 	}
 
-	lb := &LoadBalancer{backends: bs}
+	lb := &LoadBalancer{backends: bs, maxRetries: 1}
 	for _, opt := range opts {
 		opt(lb)
 	}
@@ -44,6 +49,13 @@ func New(backends []*url.URL, opts ...Option) *LoadBalancer {
 }
 
 func (lb *LoadBalancer) Backends() []*Backend { return lb.backends }
+
+func (lb *LoadBalancer) SetMaxRetries(n int) {
+	if n < 0 {
+		n = 0
+	}
+	lb.maxRetries = n
+}
 
 func (lb *LoadBalancer) next() (*Backend, error) {
 	if len(lb.backends) == 0 {
@@ -64,18 +76,67 @@ func (lb *LoadBalancer) next() (*Backend, error) {
 
 // ServeHTTP проксирует запрос на следующий backend.
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	b, err := lb.next()
-	if err != nil {
-		http.Error(w, "no backends available", http.StatusServiceUnavailable)
+	// Чтобы можно было безопасно ретраить, читаем body один раз и переиспользуем.
+	var bodyBuf []byte
+	if r.Body != nil {
+		bodyBuf, _ = io.ReadAll(r.Body)
+		_ = r.Body.Close()
+	}
+
+	attempts := lb.maxRetries + 1
+	var lastErr error
+
+	for i := 0; i < attempts; i++ {
+		b, err := lb.next()
+		if err != nil {
+			http.Error(w, "no backends available", http.StatusServiceUnavailable)
+			return
+		}
+
+		req := r.Clone(r.Context())
+		if bodyBuf != nil {
+			req.Body = io.NopCloser(bytes.NewReader(bodyBuf))
+			req.ContentLength = int64(len(bodyBuf))
+		}
+
+		lb.totalRequests.Add(1)
+		b.IncTotal()
+		b.IncActive()
+
+		rec := httptest.NewRecorder()
+		var proxyErr error
+		p := b.Proxy()
+		prev := p.ErrorHandler
+		p.ErrorHandler = func(rw http.ResponseWriter, rr *http.Request, e error) {
+			proxyErr = e
+			// Не пишем ответ в rw, чтобы можно было ретраить.
+		}
+		p.ServeHTTP(rec, req)
+		p.ErrorHandler = prev
+
+		b.DecActive()
+
+		if proxyErr != nil {
+			lastErr = proxyErr
+			b.SetAlive(false, proxyErr.Error())
+			continue
+		}
+
+		// Успех: копируем буферизованный ответ в клиента.
+		for k, vv := range rec.Header() {
+			for _, v := range vv {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(rec.Code)
+		_, _ = w.Write(rec.Body.Bytes())
 		return
 	}
 
-	lb.totalRequests.Add(1)
-	b.IncTotal()
-	b.IncActive()
-	defer b.DecActive()
-
-	b.Proxy().ServeHTTP(w, r)
+	if lastErr != nil {
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
 }
 
 func (lb *LoadBalancer) Stats() Stats {
