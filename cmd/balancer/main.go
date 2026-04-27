@@ -29,21 +29,24 @@ func main() {
 	})
 	lb := balancer.New(backendURLs)
 
-	// Health 
+	// Active health checks
+	hc := balancer.NewHealthChecker(2*time.Second, 800*time.Millisecond)
+	hcCtx, hcCancel := context.WithCancel(context.Background())
+	defer hcCancel()
+	go hc.Run(hcCtx, lb.Backends())
+
+	// Health
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	// Пока заглушка. В следующей части подключим реальные backend-ы и счётчики.
+	// Реальная статистика
 	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"backends":       []any{},
-			"total_requests": 0,
-		})
+		_ = json.NewEncoder(w).Encode(lb.Stats())
 	})
 
 	// Всё остальное проксируем на backend-ы.

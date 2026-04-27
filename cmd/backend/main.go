@@ -23,7 +23,6 @@ func main() {
 	slog.SetDefault(logger)
 
 	mux := http.NewServeMux()
-	// Один handler на все пути: /health и “обычные” запросы. Это проще для учебного backend-а.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
