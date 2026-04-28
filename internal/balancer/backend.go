@@ -11,12 +11,14 @@ type Backend struct {
 	Name string
 	URL  *url.URL
 
+	// Runtime state updated by the balancer and health checker.
 	alive         atomic.Bool
 	totalRequests atomic.Uint64
 	active        atomic.Int64
 
+	// Health check bookkeeping (stored as atomics to avoid a mutex).
 	lastHealthCheckUnix atomic.Int64
-	lastHealthErr       atomic.Value
+	lastHealthErr       atomic.Value // string
 
 	proxy *httputil.ReverseProxy
 }
@@ -27,6 +29,7 @@ func NewBackend(name string, u *url.URL, p *httputil.ReverseProxy) *Backend {
 		URL:   u,
 		proxy: p,
 	}
+	// Default to "alive" until the first health check cycle runs.
 	b.alive.Store(true)
 	b.lastHealthErr.Store("")
 	return b

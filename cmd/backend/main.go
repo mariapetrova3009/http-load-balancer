@@ -26,6 +26,7 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
+		// A minimal health endpoint used by the load balancer.
 		if r.Method == http.MethodGet && r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{

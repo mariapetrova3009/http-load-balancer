@@ -40,6 +40,7 @@ func (h *HealthChecker) Run(ctx context.Context, backends []*Backend) {
 	t := time.NewTicker(h.interval)
 	defer t.Stop()
 
+	// Run an initial probe so /stats is useful right after startup.
 	h.checkAll(ctx, backends)
 
 	for {

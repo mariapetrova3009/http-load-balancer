@@ -25,6 +25,7 @@ type HealthCheckConfig struct {
 }
 
 type RetryConfig struct {
+	// MaxRetries applies to GET/HEAD only.
 	MaxRetries   int
 	MaxBodyBytes int64
 }

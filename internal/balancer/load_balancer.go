@@ -14,8 +14,7 @@ import (
 )
 
 var ErrNoBackends = errors.New("no backends available")
-
-// LoadBalancer хранит backend-ы и раздаёт запросы по round-robin среди живых.
+ 
 type LoadBalancer struct {
 	backends []*Backend
 	idx      uint64
@@ -70,7 +69,7 @@ func (lb *LoadBalancer) next() (*Backend, error) {
 		return nil, ErrNoBackends
 	}
 
-	// Ищем живой backend, начиная с round-robin индекса.
+
 	start := atomic.AddUint64(&lb.idx, 1) - 1
 	n := len(lb.backends)
 	for step := 0; step < n; step++ {
@@ -82,7 +81,7 @@ func (lb *LoadBalancer) next() (*Backend, error) {
 	return nil, ErrNoBackends
 }
 
-// ServeHTTP проксирует запрос на следующий backend.
+
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	canRetry := lb.maxRetries > 0 && (r.Method == http.MethodGet || r.Method == http.MethodHead)
 	attempts := 1
@@ -91,7 +90,7 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var lastErr error
 
-	// Чтобы можно было безопасно ретраить, читаем body один раз и переиспользуем (с лимитом).
+	
 	var bodyBuf []byte
 	if canRetry && r.Body != nil {
 		buf, tooLarge, _ := readBodyWithLimit(r.Body, lb.maxBody)
@@ -117,7 +116,6 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				req.ContentLength = int64(len(bodyBuf))
 			}
 		} else {
-			// Без ретраев не трогаем исходный body.
 			req = r
 		}
 
@@ -131,7 +129,6 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		prev := p.ErrorHandler
 		p.ErrorHandler = func(rw http.ResponseWriter, rr *http.Request, e error) {
 			proxyErr = e
-			// Не пишем ответ в rw, чтобы можно было ретраить.
 		}
 		p.ServeHTTP(rec, req)
 		p.ErrorHandler = prev
@@ -144,7 +141,6 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Успех: копируем буферизованный ответ в клиента.
 		for k, vv := range rec.Header() {
 			for _, v := range vv {
 				w.Header().Add(k, v)
@@ -163,7 +159,6 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func readBodyWithLimit(rc io.ReadCloser, max int64) ([]byte, bool, error) {
 	defer rc.Close()
-	// max+1, чтобы понять что тело больше лимита.
 	b, err := io.ReadAll(io.LimitReader(rc, max+1))
 	if err != nil {
 		return nil, false, err

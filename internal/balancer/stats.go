@@ -3,6 +3,7 @@ package balancer
 import "time"
 
 type Stats struct {
+	// TotalRequests counts proxied requests (not /health or /stats).
 	TotalRequests uint64         `json:"total_requests"`
 	Backends      []BackendStats `json:"backends"`
 }

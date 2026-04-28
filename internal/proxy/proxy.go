@@ -6,7 +6,7 @@ import (
 	"net/url"
 )
 
-// NewReverseProxy создаёт reverse proxy на конкретный backend.
+// NewReverseProxy builds a reverse proxy to a single backend.
 func NewReverseProxy(target *url.URL) *httputil.ReverseProxy {
 	p := httputil.NewSingleHostReverseProxy(target)
 	p.Transport = http.DefaultTransport

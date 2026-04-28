@@ -29,6 +29,7 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// Backends are configured via flags (see internal/config).
 	backendURLs := mustParseBackends(cfg.Backends)
 	lb := balancer.New(backendURLs)
 	lb.SetMaxRetries(cfg.Retry.MaxRetries)
@@ -47,7 +48,6 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	// Реальная статистика
 	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
