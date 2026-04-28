@@ -32,6 +32,7 @@ func main() {
 	backendURLs := mustParseBackends(cfg.Backends)
 	lb := balancer.New(backendURLs)
 	lb.SetMaxRetries(cfg.Retry.MaxRetries)
+	lb.SetMaxBodyBytes(cfg.Retry.MaxBodyBytes)
 
 	// Active health checks
 	hc := balancer.NewHealthChecker(cfg.HealthCheck.Interval, cfg.HealthCheck.Timeout)

@@ -23,6 +23,7 @@ type LoadBalancer struct {
 	totalRequests atomic.Uint64
 
 	maxRetries int
+	maxBody    int64
 }
 
 type Option func(*LoadBalancer)
@@ -41,7 +42,7 @@ func New(backends []*url.URL, opts ...Option) *LoadBalancer {
 		bs = append(bs, NewBackend(fmt.Sprintf("backend-%d", i+1), u, p))
 	}
 
-	lb := &LoadBalancer{backends: bs, maxRetries: 1}
+	lb := &LoadBalancer{backends: bs, maxRetries: 1, maxBody: 1 << 20}
 	for _, opt := range opts {
 		opt(lb)
 	}
@@ -55,6 +56,13 @@ func (lb *LoadBalancer) SetMaxRetries(n int) {
 		n = 0
 	}
 	lb.maxRetries = n
+}
+
+func (lb *LoadBalancer) SetMaxBodyBytes(n int64) {
+	if n <= 0 {
+		n = 1 << 20
+	}
+	lb.maxBody = n
 }
 
 func (lb *LoadBalancer) next() (*Backend, error) {
@@ -76,15 +84,23 @@ func (lb *LoadBalancer) next() (*Backend, error) {
 
 // ServeHTTP проксирует запрос на следующий backend.
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Чтобы можно было безопасно ретраить, читаем body один раз и переиспользуем.
-	var bodyBuf []byte
-	if r.Body != nil {
-		bodyBuf, _ = io.ReadAll(r.Body)
-		_ = r.Body.Close()
+	canRetry := lb.maxRetries > 0 && (r.Method == http.MethodGet || r.Method == http.MethodHead)
+	attempts := 1
+	if canRetry {
+		attempts = lb.maxRetries + 1
 	}
-
-	attempts := lb.maxRetries + 1
 	var lastErr error
+
+	// Чтобы можно было безопасно ретраить, читаем body один раз и переиспользуем (с лимитом).
+	var bodyBuf []byte
+	if canRetry && r.Body != nil {
+		buf, tooLarge, _ := readBodyWithLimit(r.Body, lb.maxBody)
+		if tooLarge {
+			http.Error(w, "request entity too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		bodyBuf = buf
+	}
 
 	for i := 0; i < attempts; i++ {
 		b, err := lb.next()
@@ -93,10 +109,16 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		req := r.Clone(r.Context())
-		if bodyBuf != nil {
-			req.Body = io.NopCloser(bytes.NewReader(bodyBuf))
-			req.ContentLength = int64(len(bodyBuf))
+		var req *http.Request
+		if canRetry {
+			req = r.Clone(r.Context())
+			if bodyBuf != nil {
+				req.Body = io.NopCloser(bytes.NewReader(bodyBuf))
+				req.ContentLength = int64(len(bodyBuf))
+			}
+		} else {
+			// Без ретраев не трогаем исходный body.
+			req = r
 		}
 
 		lb.totalRequests.Add(1)
@@ -137,6 +159,19 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
+}
+
+func readBodyWithLimit(rc io.ReadCloser, max int64) ([]byte, bool, error) {
+	defer rc.Close()
+	// max+1, чтобы понять что тело больше лимита.
+	b, err := io.ReadAll(io.LimitReader(rc, max+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(b)) > max {
+		return nil, true, nil
+	}
+	return b, false, nil
 }
 
 func (lb *LoadBalancer) Stats() Stats {

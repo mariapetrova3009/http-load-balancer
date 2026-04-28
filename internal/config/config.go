@@ -25,7 +25,8 @@ type HealthCheckConfig struct {
 }
 
 type RetryConfig struct {
-	MaxRetries int
+	MaxRetries   int
+	MaxBodyBytes int64
 }
 
 type BackendConfig struct {
@@ -43,7 +44,8 @@ func Default() Config {
 			Timeout:  800 * time.Millisecond,
 		},
 		Retry: RetryConfig{
-			MaxRetries: 1,
+			MaxRetries:   1,
+			MaxBodyBytes: 1 << 20, // 1 MiB
 		},
 		Backends: []BackendConfig{
 			{Name: "backend-1", URL: "http://localhost:9001"},
@@ -59,6 +61,7 @@ type FlagArgs struct {
 	HCInterval time.Duration
 	HCTimeout  time.Duration
 	Retries    int
+	MaxBody    int64
 }
 
 func FromFlags() (Config, error) {
@@ -70,6 +73,7 @@ func FromFlags() (Config, error) {
 	flag.DurationVar(&a.HCInterval, "hc-interval", def.HealthCheck.Interval, "health check interval")
 	flag.DurationVar(&a.HCTimeout, "hc-timeout", def.HealthCheck.Timeout, "health check timeout")
 	flag.IntVar(&a.Retries, "retries", def.Retry.MaxRetries, "max retries on proxy error (0 = disable)")
+	flag.Int64Var(&a.MaxBody, "max-body-bytes", def.Retry.MaxBodyBytes, "max request body size to buffer for retries (bytes)")
 	flag.Parse()
 
 	cfg := def
@@ -80,6 +84,10 @@ func FromFlags() (Config, error) {
 		return Config{}, errors.New("retries must be >= 0")
 	}
 	cfg.Retry.MaxRetries = a.Retries
+	if a.MaxBody <= 0 {
+		return Config{}, errors.New("max-body-bytes must be > 0")
+	}
+	cfg.Retry.MaxBodyBytes = a.MaxBody
 
 	bes, err := parseBackends(a.Backends)
 	if err != nil {
